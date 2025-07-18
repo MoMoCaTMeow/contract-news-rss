@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 # --- 設定項目：ここをカスタマイズしてください ---
 
 # Tavily APIで検索するキーワードのリスト
-# 複数指定することで、より幅広いニュースを収集できます。
 SEARCH_QUERIES = [
     "契約書 法改正 ニュース",
     "電子契約 最新動向",
@@ -18,13 +17,12 @@ SEARCH_QUERIES = [
 ]
 
 # RSSフィードの基本情報
+RSS_FEED_LINK = "https://github.com/momocatmeow-contract-news-rss/momocatmeow-contract-news-rss" 
 RSS_FEED_TITLE = "AI厳選！契約書関連ニュース"
-RSS_FEED_LINK = "https://github.com/YOUR_USERNAME/YOUR_REPOSITORY_NAME" # あなたのリポジトリのURLに変更してください
-RSS_FEED_DESCRIPTION = "AIがWebから自動収集・要約した契約関連の最新ニュースです。"
+RSS_FEED_DESCRIPTION = "AIがWebから自動収集した契約関連の最新ニュースです。（本文表示）"
 RSS_FILE_NAME = "feed.xml"
 
 # --- Gemini APIへの指示（プロンプト） ---
-# AIの挙動を最も左右する重要な部分です。
 GEMINI_PROMPT = """
 あなたは、日本企業の法務担当者や弁護士向けに情報提供を行う、非常に優秀なAIアシスタントです。
 以下のWeb記事の内容を分析し、契約実務、法改正、または関連するリーガルテックの動向について、専門家にとって価値のある重要な情報が含まれているか判断してください。
@@ -37,7 +35,6 @@ GEMINI_PROMPT = """
 {{
   "is_important": true,
   "title": "（記事のタイトルを簡潔に要約）",
-  "summary": "（記事の要点を3文で具体的に要約）",
   "category": "（「法改正」「電子契約」「判例」「M&A」「知財」など、最も適切なカテゴリを一つ）"
 }}
 
@@ -92,33 +89,34 @@ def get_article_content_from_jina(url: str) -> str | None:
     try:
         response = requests.get(jina_reader_url, timeout=60)
         response.raise_for_status()
-        # 最初の数行にある余分な情報を削除することがある
         content = response.text
         lines = content.split('\n')
-        # タイトル行（通常 `#` で始まる）を探す
         for i, line in enumerate(lines):
             if line.strip().startswith('#'):
                 return '\n'.join(lines[i:])
-        return content # 見つからなければそのまま返す
+        return content
     except requests.exceptions.RequestException as e:
         print(f"❌ Jina Readerでの記事取得エラー: {e}")
         return None
 
-def summarize_with_gemini(article_text: str) -> dict | None:
-    """Gemini APIを使って記事を分析・要約し、JSON形式で返す"""
+def analyze_with_gemini(article_text: str) -> dict | None: # 関数名を実態に合わせて変更
+    """Gemini APIを使って記事を分析し、重要かどうかをJSON形式で返す"""
     print("🧠 Geminiによる分析中...")
     model = genai.GenerativeModel('gemini-1.5-flash')
-    prompt = GEMINI_PROMPT.format(article_text=article_text)
+    # プロンプトから "summary" の生成指示を削除
+    prompt = GEMINI_PROMPT.format(article_text=article_text) 
     try:
         response = model.generate_content(prompt)
-        # レスポンスからJSON部分を抽出する
         cleaned_text = response.text.strip().replace("```json", "").replace("```", "").strip()
         result = json.loads(cleaned_text)
         print(f"✨ Geminiの分析完了: 重要か？ -> {result.get('is_important')}")
         return result
     except Exception as e:
         print(f"❌ Gemini APIでの分析エラー: {e}")
-        print(f"応答テキスト: {response.text[:200]}") # デバッグ用に一部表示
+        try:
+            print(f"応答テキスト: {response.text[:200]}") # デバッグ用に一部表示
+        except NameError:
+            pass
         return None
 
 
@@ -138,14 +136,31 @@ def main():
     for url in all_urls:
         article_text = get_article_content_from_jina(url)
         if article_text:
-            summary_json = summarize_with_gemini(article_text)
-            if summary_json and summary_json.get("is_important"):
-                summary_json['link'] = url # 元のURLも情報に加えておく
-                important_articles.append(summary_json)
+            # ### 変更点 1: Geminiには分析だけをさせ、本文は別に保持する ###
+            analysis_result = analyze_with_gemini(article_text)
+            
+            # Geminiが重要と判断した場合
+            if analysis_result and analysis_result.get("is_important"):
+                # 記事の情報を一つの辞書にまとめる
+                article_data = {
+                    'title': analysis_result.get("title", "No Title"),
+                    'category': analysis_result.get("category", "N/A"),
+                    'link': url,
+                    'full_text': article_text # <- ここで記事本文を保持する
+                }
+                important_articles.append(article_data)
+
         print("-" * 20)
 
     if not important_articles:
         print("😭 AIが重要と判断した記事はありませんでした。")
+        # 記事がない場合でも空のフィードを生成して上書きする
+        fg = FeedGenerator()
+        fg.title(RSS_FEED_TITLE)
+        fg.link(href=RSS_FEED_LINK, rel='alternate')
+        fg.description(RSS_FEED_DESCRIPTION)
+        fg.rss_file(RSS_FILE_NAME, pretty=True)
+        print("📝 空のRSSフィードを生成しました。")
         return
 
     print(f"\n🎉 {len(important_articles)}件の重要記事をRSSフィードとして生成します。")
@@ -156,13 +171,17 @@ def main():
     fg.link(href=RSS_FEED_LINK, rel='alternate')
     fg.description(RSS_FEED_DESCRIPTION)
 
+    # ### 変更点 2: descriptionに要約(summary)の代わりに記事本文(full_text)を入れる ###
     for article in important_articles:
         fe = fg.add_entry()
-        fe.title(article.get("title", "No Title"))
+        fe.title(article.get("title"))
         fe.link(href=article.get("link"))
-        summary = article.get("summary", "")
+        
         category = article.get("category", "N/A")
-        fe.description(f"【カテゴリ: {category}】<br/><br/>{summary}")
+        full_text_content = article.get("full_text", "記事本文が取得できませんでした。")
+        
+        # HTMLとしてdescriptionを構成する
+        fe.description(f"<b>【カテゴリ】: {category}</b><br/><br/><hr/><br/>{full_text_content.replace('\n', '<br/>')}")
 
     # RSSファイルを保存
     fg.rss_file(RSS_FILE_NAME, pretty=True)
