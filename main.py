@@ -17,7 +17,8 @@ SEARCH_QUERIES = [
 ]
 
 # RSSフィードの基本情報
-RSS_FEED_LINK = "https://github.com/momocatmeow-contract-news-rss/momocatmeow-contract-news-rss" 
+# 下記をあなたのリポジトリURLに合わせて変更してください (例: https://github.com/momocatmeow/contract-news-rss)
+RSS_FEED_LINK = "https://github.com/momocatmeow-contract-news-rss/momocatmeow-contract-news-rss"
 RSS_FEED_TITLE = "AI厳選！契約書関連ニュース"
 RSS_FEED_DESCRIPTION = "AIがWebから自動収集した契約関連の最新ニュースです。（本文表示）"
 RSS_FILE_NAME = "feed.xml"
@@ -99,12 +100,11 @@ def get_article_content_from_jina(url: str) -> str | None:
         print(f"❌ Jina Readerでの記事取得エラー: {e}")
         return None
 
-def analyze_with_gemini(article_text: str) -> dict | None: # 関数名を実態に合わせて変更
+def analyze_with_gemini(article_text: str) -> dict | None:
     """Gemini APIを使って記事を分析し、重要かどうかをJSON形式で返す"""
     print("🧠 Geminiによる分析中...")
     model = genai.GenerativeModel('gemini-1.5-flash')
-    # プロンプトから "summary" の生成指示を削除
-    prompt = GEMINI_PROMPT.format(article_text=article_text) 
+    prompt = GEMINI_PROMPT.format(article_text=article_text)
     try:
         response = model.generate_content(prompt)
         cleaned_text = response.text.strip().replace("```json", "").replace("```", "").strip()
@@ -114,7 +114,7 @@ def analyze_with_gemini(article_text: str) -> dict | None: # 関数名を実態�
     except Exception as e:
         print(f"❌ Gemini APIでの分析エラー: {e}")
         try:
-            print(f"応答テキスト: {response.text[:200]}") # デバッグ用に一部表示
+            print(f"応答テキスト: {response.text[:200]}")
         except NameError:
             pass
         return None
@@ -131,30 +131,24 @@ def main():
             all_urls.add(url)
 
     print(f"\n合計 {len(all_urls)}件のユニークなURLを処理します。")
-    
+
     important_articles = []
     for url in all_urls:
         article_text = get_article_content_from_jina(url)
         if article_text:
-            # ### 変更点 1: Geminiには分析だけをさせ、本文は別に保持する ###
             analysis_result = analyze_with_gemini(article_text)
-            
-            # Geminiが重要と判断した場合
             if analysis_result and analysis_result.get("is_important"):
-                # 記事の情報を一つの辞書にまとめる
                 article_data = {
                     'title': analysis_result.get("title", "No Title"),
                     'category': analysis_result.get("category", "N/A"),
                     'link': url,
-                    'full_text': article_text # <- ここで記事本文を保持する
+                    'full_text': article_text
                 }
                 important_articles.append(article_data)
-
         print("-" * 20)
 
     if not important_articles:
         print("😭 AIが重要と判断した記事はありませんでした。")
-        # 記事がない場合でも空のフィードを生成して上書きする
         fg = FeedGenerator()
         fg.title(RSS_FEED_TITLE)
         fg.link(href=RSS_FEED_LINK, rel='alternate')
@@ -171,17 +165,20 @@ def main():
     fg.link(href=RSS_FEED_LINK, rel='alternate')
     fg.description(RSS_FEED_DESCRIPTION)
 
-    # ### 変更点 2: descriptionに要約(summary)の代わりに記事本文(full_text)を入れる ###
     for article in important_articles:
         fe = fg.add_entry()
         fe.title(article.get("title"))
         fe.link(href=article.get("link"))
-        
+
         category = article.get("category", "N/A")
         full_text_content = article.get("full_text", "記事本文が取得できませんでした。")
-        
+
+        # --- ここが修正箇所 ---
+        # f-stringの中で '\n' を直接使うとエラーになるため、一度変数に格納してから使用する
+        html_content = full_text_content.replace('\n', '<br/>')
+
         # HTMLとしてdescriptionを構成する
-        fe.description(f"<b>【カテゴリ】: {category}</b><br/><br/><hr/><br/>{full_text_content.replace('\n', '<br/>')}")
+        fe.description(f"<b>【カテゴリ】: {category}</b><br/><br/><hr/><br/>{html_content}")
 
     # RSSファイルを保存
     fg.rss_file(RSS_FILE_NAME, pretty=True)
