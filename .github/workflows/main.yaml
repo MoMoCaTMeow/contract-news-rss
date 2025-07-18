@@ -41,10 +41,3 @@ jobs:
           publish_branch: gh-pages
           user_name: 'github-actions[bot]'
           user_email: 'github-actions[bot]@users.noreply.github.com'```
-
-**【修正のポイント】**
-`on:`ブロックの直後に、以下の3行を追加しました。これにより、このワークフロー全体でリポジトリへの書き込みが許可されます。
-
-```yaml
-permissions:
-  contents: write
