@@ -1,13 +1,10 @@
 name: Build and Deploy RSS Feed
 
 on:
-  # 毎日22:00 UTC（日本時間 午前7時）に自動実行
   schedule:
     - cron: '0 22 * * *'
-  # GitHubのActionsタブから手動で実行できるようにする
   workflow_dispatch:
 
-# ワークフローに必要な「書き込み権限」を付与する
 permissions:
   contents: write
 
@@ -16,37 +13,38 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ステップ1: リポジトリのコードをチェックアウト
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ステップ2: Python環境をセットアップ
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # ステップ3: 必要なライブラリをインストール
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      # ステップ4: Pythonスクリプトを実行してRSSを生成
       - name: Run Python script to generate RSS
         env:
           GOOGLE_GEMINI_API_KEY: ${{ secrets.GOOGLE_GEMINI_API_KEY }}
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
         run: python main.py
 
-      # ステップ5: 生成されたRSSファイルをGitHub Pagesにデプロイ
+      # --- ここからが重要な修正箇所 ---
+      - name: Prepare artifact for deployment
+        # 'public'という名前で公開用ディレクトリを作成
+        run: mkdir -p public
+      - name: Move feed to public directory
+        # 'feed.xml'だけをpublicディレクトリに移動
+        run: mv feed.xml public/
+
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./
-          # feed.xmlとREADME.mdを公開対象にする
-          # 変更があったファイルのみが更新されます
-          keep_files: false 
+          # デプロイするディレクトリを'public'に限定する
+          publish_dir: ./public
           user_name: 'github-actions[bot]'
           user_email: 'github-actions[bot]@users.noreply.github.com'
