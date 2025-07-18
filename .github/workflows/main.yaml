@@ -1,0 +1,52 @@
+name: Build and Deploy RSS Feed
+
+# このワークフローが実行されるタイミングを定義
+on:
+  # 毎日22:00 UTC（日本時間 午前7時）に自動実行
+  schedule:
+    - cron: '0 22 * * *'
+  # GitHubのActionsタブから手動で実行できるようにする
+  workflow_dispatch:
+
+# 実行するジョブを定義
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest # 最新のUbuntu環境で実行
+
+    steps:
+      # ステップ1: リポジトリのコードをチェックアウト
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ステップ2: Python環境をセットアップ
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11' # Pythonのバージョンを指定
+
+      # ステップ3: 必要なライブラリをインストール
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      # ステップ4: Pythonスクリプトを実行してRSSを生成
+      - name: Run Python script to generate RSS
+        env:
+          # GitHub Secretsに登録したAPIキーを環境変数として渡す
+          GOOGLE_GEMINI_API_KEY: ${{ secrets.GOOGLE_GEMINI_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+        run: python main.py
+
+      # ステップ5: 生成されたRSSファイルをGitHub Pagesにデプロイ
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # デプロイするファイルが含まれているフォルダを指定
+          publish_dir: ./ 
+          # feed.xmlのみをデプロイの対象にする
+          publish_branch: gh-pages # 公開用のブランチ名
+          cname: ''
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
